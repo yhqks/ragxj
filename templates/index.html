@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>智能文档分析系统</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="static/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <!-- HTMX 轻量级AJAX -->
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #6c757d;
+            --background-color: #f8f9fa;
+        }
+        
+        body {
+            background-color: var(--background-color);
+            min-height: 100vh;
+        }
+        
+        .upload-area {
+            border: 2px dashed #ced4da;
+            border-radius: 10px;
+            transition: all 0.3s;
+            background: white;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary-color);
+            background-color: rgba(74, 144, 226, 0.05);
+        }
+        
+        .message-user {
+            background: #e3f2fd;
+            border-radius: 18px 18px 0 18px;
+            max-width: 80%;
+            margin-left: auto;
+            margin-bottom: 12px;
+        }
+        
+        .message-bot {
+            background: white;
+            border-radius: 18px 18px 18px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-width: 80%;
+            margin-right: auto;
+            margin-bottom: 20px;
+        }
+        
+        .file-item {
+            transition: all 0.2s;
+        }
+        
+        .file-item:hover {
+            background-color: rgba(0, 0, 0, 0.03);
+        }
+        
+        .source-badge {
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        
+        .source-badge:hover {
+            opacity: 0.9;
+        }
+        
+        #chatHistory {
+            scroll-behavior: smooth;
+        }
+        
+        .message-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+        }
+        
+        .message-content pre {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+        
+        .message-content code {
+            background: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        
+        .message-time {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+        
+        .welcome-message {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-robot me-2"></i>智能文档分析系统
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#helpModal">
+                            <i class="bi bi-question-circle"></i> 帮助
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <div class="container my-4">
+        <div class="row g-4">
+            <!-- 左侧文件上传区 -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-folder-plus me-2"></i>文档上传
+                    </div>
+                    <div class="card-body">
+                        <!-- 文件上传区域 -->
+                        <form id="uploadForm" hx-post="/api/upload" hx-encoding="multipart/form-data" 
+                              class="d-flex flex-column h-100">
+                            <div id="uploadArea" class="upload-area text-center p-4 mb-3">
+                                <div class="mb-3">
+                                    <i class="bi bi-cloud-arrow-up fs-1 text-primary"></i>
+                                </div>
+                                <p class="mb-2">拖放文件到此处或</p>
+                                <input type="file" id="fileInput" name="files" multiple 
+                                       class="d-none" onchange="updateFileList()">
+                                <button type="button" onclick="document.getElementById('fileInput').click()" 
+                                        class="btn btn-primary btn-sm">
+                                    选择文件
+                                </button>
+                                <div class="text-muted small mt-2">支持PDF、Word、Excel等格式</div>
+                            </div>
+                            
+                            <!-- 文件列表 -->
+                            <div class="flex-grow-1">
+                                <h6 class="mt-3 mb-2">已选文件 <span id="fileCount" class="badge bg-secondary">0</span></h6>
+                                <div id="fileList" class="list-group file-list">
+                                    <!-- 文件列表动态生成 -->
+                                </div>
+                            </div>
+                            
+                            <!-- 上传按钮 -->
+                            <button type="submit" class="btn btn-primary mt-3 w-100" id="uploadBtn">
+                                <span id="uploadSpinner" class="spinner-border spinner-border-sm d-none"></span>
+                                上传文件
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右侧聊天区 -->
+            <div class="col-lg-8">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-chat-left-text me-2"></i>智能问答</span>
+                        <button class="btn btn-sm btn-light" onclick="clearChat()">
+                            <i class="bi bi-trash"></i> 清空
+                        </button>
+                    </div>
+                    <div class="card-body d-flex flex-column p-0">
+                        <!-- 聊天历史 -->
+                        <div id="chatHistory" class="flex-grow-1 p-3 overflow-auto" style="max-height: 500px;">
+                            <!-- 初始欢迎消息 -->
+                            <div class="welcome-message text-center text-muted p-4">
+                                <i class="bi bi-lightbulb fs-1"></i>
+                                <h5 class="mt-2">欢迎使用智能文档分析系统</h5>
+                                <p class="mb-0">上传文档后，您可以开始提问</p>
+                            </div>
+                            
+                            <!-- 动态生成的消息容器 -->
+                            <div id="messageContainer"></div>
+                        </div>
+                        
+                        <!-- 输入区域 -->
+                        <div class="p-3 border-top">
+                            <form id="chatForm" hx-post="/api/chat" hx-target="#messageContainer" hx-swap="beforeend"
+                                  class="d-flex align-items-end">
+                                <div class="flex-grow-1 me-2">
+                                    <textarea id="inputMessage" name="message" class="form-control" 
+                                              placeholder="请输入您的问题..." rows="2" required></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="height: 58px;">
+                                    <span id="chatSpinner" class="spinner-border spinner-border-sm d-none"></span>
+                                    发送
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 结果展示区 -->
+        <div class="card mt-4 shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-file-earmark-text me-2"></i>分析结果
+            </div>
+            <div class="card-body">
+                <div id="resultsContainer">
+                    <div class="text-center text-muted p-4">
+                        <i class="bi bi-search fs-1"></i>
+                        <p class="mt-2 mb-0">问答结果将显示在这里</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 消息模板 (隐藏) -->
+    <div id="messageTemplates" class="d-none">
+        <!-- 用户消息模板 -->
+        <div class="message-user">
+            <div class="p-3 mb-2">
+                <div class="message-content"></div>
+                <div class="text-end small text-muted mt-1">
+                    <i class="bi bi-person-fill"></i> 用户 · <span class="message-time"></span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 系统回复模板 -->
+        <div class="message-bot">
+            <div class="p-3 mb-2">
+                <div class="message-content"></div>
+                <div class="small text-muted mt-1">
+                    <i class="bi bi-robot"></i> 系统 · <span class="message-time"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 帮助模态框 -->
+    <div class="modal fade" id="helpModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">使用帮助</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <h6>如何使用本系统：</h6>
+                    <ol>
+                        <li>上传您的文档（支持多文件批量上传）</li>
+                        <li>在右侧输入框输入您的问题</li>
+                        <li>系统将从文档中查找相关信息并回答</li>
+                        <li>点击来源可以查看原文内容</li>
+                    </ol>
+                    <h6 class="mt-3">支持的文件格式：</h6>
+                    <ul>
+                        <li>PDF (.pdf)</li>
+                        <li>Word (.docx, .doc)</li>
+                        <li>Excel (.xlsx, .xls)</li>
+                        <li>PowerPoint (.pptx, .ppt)</li>
+                        <li>文本文件 (.txt)</li>
+                        <li>图片文件(.jpg等)</li>
+                    </ul>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">我知道了</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bootstrap JS 和 Popper -->
+    <script src="/static/bootstrap/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // 文件上传处理
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const fileCount = document.getElementById('fileCount');
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadSpinner = document.getElementById('uploadSpinner');
+        
+        // 拖放功能
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        ['dragleave', 'dragend'].forEach(type => {
+            uploadArea.addEventListener(type, () => {
+                uploadArea.classList.remove('dragover');
+            });
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            fileInput.files = e.dataTransfer.files;
+            updateFileList();
+        });
+        
+        // 更新文件列表显示
+        function updateFileList() {
+            fileList.innerHTML = '';
+            const files = fileInput.files;
+            fileCount.textContent = files.length;
+            
+            if (files.length === 0) {
+                fileList.innerHTML = '<div class="text-center text-muted p-2">没有选择文件</div>';
+                return;
+            }
+            
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const item = document.createElement('div');
+                item.className = 'list-group-item file-item d-flex justify-content-between align-items-center';
+                item.innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-file-earmark me-2"></i>
+                        <span class="text-truncate" style="max-width: 180px">${file.name}</span>
+                    </div>
+                    <small class="text-muted">${formatFileSize(file.size)}</small>
+                `;
+                fileList.appendChild(item);
+            }
+        }
+        
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+        
+        // 上传表单处理
+        uploadForm.addEventListener('htmx:beforeRequest', function() {
+            if (fileInput.files.length === 0) {
+                alert('请先选择文件');
+                return false;
+            }
+            uploadBtn.disabled = true;
+            uploadSpinner.classList.remove('d-none');
+        });
+        
+        uploadForm.addEventListener('htmx:afterRequest', function() {
+            uploadBtn.disabled = false;
+            uploadSpinner.classList.add('d-none');
+        });
+        
+        // 聊天表单处理
+        const chatForm = document.getElementById('chatForm');
+        const chatSpinner = document.getElementById('chatSpinner');
+        
+        // 在提交前添加用户消息
+        chatForm.addEventListener('htmx:beforeRequest', function(evt) {
+            const input = document.getElementById('inputMessage');
+            const message = input.value.trim();
+            if (!message) {
+                evt.preventDefault();
+                return;
+            }
+            
+            // 显示用户消息
+            addMessage(message, 'user');
+            
+            // 显示加载中的系统消息
+            addMessage('<i class="spinner-border spinner-border-sm"></i> 思考中...', 'bot');
+            
+            // 清空输入框但保留HTMX的提交数据
+            input.value = '';
+            chatSpinner.classList.remove('d-none');
+        });
+        
+        // 处理响应后更新系统消息
+        chatForm.addEventListener('htmx:afterOnLoad', function(evt) {
+            chatSpinner.classList.add('d-none');
+            
+            // 移除"思考中"消息
+            const thinkingMessages = document.querySelectorAll('.message-bot .spinner-border');
+            thinkingMessages.forEach(msg => {
+                msg.closest('.message-bot').remove();
+            });
+            
+            // 滚动到底部
+            const chatHistory = document.getElementById('chatHistory');
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        });
+        
+        // 添加消息到聊天历史
+        function addMessage(content, type) {
+            const container = document.getElementById('messageContainer');
+            const templates = document.getElementById('messageTemplates');
+            
+            // 克隆对应的模板
+            const template = type === 'user' 
+                ? templates.querySelector('.message-user').cloneNode(true)
+                : templates.querySelector('.message-bot').cloneNode(true);
+            
+            // 填充内容
+            template.querySelector('.message-content').innerHTML = content;
+            template.querySelector('.message-time').textContent = new Date().toLocaleTimeString();
+            
+            // 添加到容器
+            container.appendChild(template);
+            
+            // 移除欢迎消息（如果有）
+            const welcomeMsg = document.querySelector('.welcome-message');
+            if (welcomeMsg) {
+                welcomeMsg.remove();
+            }
+            
+            // 滚动到底部
+            container.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+        
+        // 清空聊天
+        function clearChat() {
+            document.getElementById('messageContainer').innerHTML = '';
+            document.getElementById('chatHistory').innerHTML = `
+                <div class="welcome-message text-center text-muted p-4">
+                    <i class="bi bi-lightbulb fs-1"></i>
+                    <h5 class="mt-2">欢迎使用智能文档分析系统</h5>
+                    <p class="mb-0">上传文档后，您可以开始提问</p>
+                </div>
+                <div id="messageContainer"></div>
+            `;
+        }
+        
+        // 初始化显示
+        updateFileList();
+    </script>
+</body>
+</html>
